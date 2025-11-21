@@ -30,9 +30,9 @@ class OpenRs2Api {
         return ObjectMapper().readValue(response.body(), Array<OpenRs2Cache>::class.java)
     }
 
-    fun getCacheKeysById(id: String): Array<OpenRs2CacheKeys>? {
+    fun getCacheKeysById(scope: String, id: String): Array<OpenRs2CacheKeys>? {
         val request = HttpRequest.newBuilder()
-            .uri(URI.create("$OPENRS2_URL/caches/runescape/$id/keys.json"))
+            .uri(URI.create("$OPENRS2_URL/caches/$scope/$id/keys.json"))
             .header("Accept", "application/json")
             .GET()
             .build()

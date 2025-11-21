@@ -12,6 +12,11 @@ class ParamsManager {
 
     fun loadFromPath(path: String) {
         val paramsFile = File(path, "params.txt")
+        if (!paramsFile.exists()) {
+            // params.txt is optional - the revision number defaults to 0 if not found
+            // This is acceptable for most use cases
+            return
+        }
         val reader = paramsFile.bufferedReader()
         parseParams(reader)
     }

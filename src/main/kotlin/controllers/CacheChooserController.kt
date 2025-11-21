@@ -14,7 +14,8 @@ import models.openrs2.OpenRs2Cache
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
-import org.jsoup.Jsoup
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipEntry
 import ui.FilteredListModel
 import ui.listener.DocumentTextListener
 import ui.listener.FilterTextListener
@@ -26,16 +27,14 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.net.URI
 import java.net.URL
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.net.ssl.SSLHandshakeException
@@ -71,7 +70,9 @@ class CacheChooserController(
         val groups = GroupLayout(contentPane)
         layout = groups
 
-        val cacheListModel = FilteredListModel<String> { it }
+        val cacheListModel = FilteredListModel<OpenRs2Cache> { cache ->
+            formatCacheDisplayString(cache)
+        }
         val txtFilter = JTextField().apply {
             document.addDocumentListener(
                 FilterTextListener(
@@ -88,6 +89,21 @@ class CacheChooserController(
         val listCaches = JList(cacheListModel).apply {
             isVisible = false
             selectionMode = ListSelectionModel.SINGLE_SELECTION
+            cellRenderer = object : javax.swing.DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(
+                    list: JList<*>?,
+                    value: Any?,
+                    index: Int,
+                    isSelected: Boolean,
+                    cellHasFocus: Boolean
+                ): java.awt.Component {
+                    val result = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                    if (value != null && value is OpenRs2Cache) {
+                        (result as JLabel).text = formatCacheDisplayString(value)
+                    }
+                    return result
+                }
+            }
             addListSelectionListener {
                 btnDownload.isEnabled = selectedIndex != -1
             }
@@ -99,34 +115,43 @@ class CacheChooserController(
         val lblStatusText = JLabel()
         val lblErrorText = JLabel().apply {
             foreground = Color.RED
+            verticalAlignment = SwingConstants.TOP
+            isOpaque = true
         }
         btnDownload.addActionListener {
             btnDownload.isEnabled = false
-            listCaches.selectedValue?.let {
-                lblStatusText.text = "Downloading cache $it, please wait.."
+            listCaches.selectedValue?.let { cache ->
+                val dateStr = cache.timestamp?.let {
+                    try {
+                        val instant = Instant.parse(it)
+                        val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
+                        localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    } catch (e: Exception) {
+                        null
+                    }
+                } ?: "unknown"
+                
+                lblStatusText.text = "Downloading cache ${dateStr}, please wait.."
                 txtCacheLocation.text = ""
 
-                downloadCache(it, { path ->
+                downloadCache(cache, { path ->
                     lblStatusText.text = ""
                     txtCacheLocation.text = path
                     btnDownload.isEnabled = true
                 }, { err ->
                     lblStatusText.text = ""
-                    lblErrorText.text = "Failed to download cache: $err"
+                    setErrorText(lblErrorText, "Failed to download cache: $err")
                     btnDownload.isEnabled = true
                 })
             }
         }
-        val scrollErrorText = JScrollPane(lblErrorText)
-
-        lblErrorText.text = "Test Error"
-        scrollErrorText.maximumSize = Dimension(
-            Int.MAX_VALUE,
-            lblErrorText.maximumSize.height + scrollErrorText.horizontalScrollBar.maximumSize.height
-        )
-        lblErrorText.text = ""
-
-        scrollErrorText.verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER
+        val scrollErrorText = JScrollPane(lblErrorText).apply {
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED
+            preferredSize = Dimension(400, 80)
+            minimumSize = Dimension(300, 50)
+            maximumSize = Dimension(Int.MAX_VALUE, 120)
+        }
         val listCachesPlaceholder =
             JLabel("No downloadable caches found.", SwingConstants.CENTER)
         val btnLaunch = JButton("Launch").apply {
@@ -146,7 +171,7 @@ class CacheChooserController(
             }
         )
 
-        val lblRuneStats = JLabel("Caches available from RuneStats")
+        val lblRuneStats = JLabel("Caches available from OpenRS2 Archive (Old School RuneScape)")
         val lblFilter = JLabel("Filter:").apply {
             displayedMnemonic = 'F'.code
             labelFor = txtFilter
@@ -281,53 +306,169 @@ class CacheChooserController(
     }
 
     private fun populateCachesList(
-        cacheListModel: FilteredListModel<String>,
+        cacheListModel: FilteredListModel<OpenRs2Cache>,
         cacheList: Component,
         listCachesPlaceholder: JLabel
     ) {
-        try {
-            val doc = Jsoup.connect(RUNESTATS_URL).get()
-            cacheListModel.backingList = doc.select("a")
-                .map { col -> col.attr("href") }
-                .filter { it.length > 10 } // get rid of ../ and ./types
-                .reversed()
-            cacheList.isVisible = true
-            listCachesPlaceholder.isVisible = false
-        } catch (e: Exception) {
-            e.printStackTrace()
-            listCachesPlaceholder.text += "\n\n${e.message}"
-            if (e is SSLHandshakeException) {
-                listCachesPlaceholder.text += "\n\nSSLHandshakeException is a known bug with certain Java versions, try updating."
+        Thread {
+            try {
+                val openRs2Api = OpenRs2Api()
+                val allCaches = openRs2Api.getCaches()
+                
+                // Filter by oldschool game and sort by timestamp (newest first)
+                val filteredCaches = allCaches
+                    .filter { it.game == "oldschool" }
+                    .sortedByDescending { cache ->
+                        cache.timestamp?.let {
+                            try {
+                                Instant.parse(it).toEpochMilli()
+                            } catch (e: Exception) {
+                                0L
+                            }
+                        } ?: 0L
+                    }
+                
+                SwingUtilities.invokeLater {
+                    if (filteredCaches.isEmpty()) {
+                        listCachesPlaceholder.text = "No Old School RuneScape caches found."
+                        listCachesPlaceholder.isVisible = true
+                        cacheList.isVisible = false
+                    } else {
+                        cacheListModel.backingList = filteredCaches
+                        cacheList.isVisible = true
+                        listCachesPlaceholder.isVisible = false
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                SwingUtilities.invokeLater {
+                    listCachesPlaceholder.text = "Error loading caches: ${e.message}"
+                    if (e is SSLHandshakeException) {
+                        listCachesPlaceholder.text += "\n\nSSLHandshakeException is a known bug with certain Java versions, try updating."
+                    }
+                    listCachesPlaceholder.isVisible = true
+                    cacheList.isVisible = false
+                }
             }
-        }
+        }.start()
     }
 
     private fun downloadCache(
-        cacheName: String,
+        cache: OpenRs2Cache,
         onComplete: (String) -> Unit,
         onFailure: (IOException) -> Unit,
     ) {
-        val destFolder = File("${AppConstants.CACHES_DIRECTORY}/${cacheName.removeSuffix(".tar.gz")}")
+        // Generate a folder name based on date and build
+        val dateStr = cache.timestamp?.let {
+            try {
+                val instant = Instant.parse(it)
+                val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
+                localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            } catch (e: Exception) {
+                null
+            }
+        } ?: "unknown"
+        
+        val buildStr = if (cache.builds.isNotEmpty()) {
+            val build = cache.builds.first()
+            if (build.minor != null) {
+                "rev${build.major}.${build.minor}"
+            } else {
+                "rev${build.major}"
+            }
+        } else {
+            "revunknown"
+        }
+        
+        val destFolderName = "$dateStr-$buildStr"
+        val destFolder = File("${AppConstants.CACHES_DIRECTORY}/$destFolderName")
 
         Thread {
             try {
-                val conn = URL("$RUNESTATS_URL/$cacheName").openConnection()
+                // Check if disk.zip is available (disk_store_valid should be true for new engine caches)
+                // Download from OpenRS2 disk.zip endpoint which provides .dat2/.idx files directly
+                val url = "$OPENRS2_URL/caches/${cache.scope}/${cache.id}/disk.zip"
+                val conn = URL(url).openConnection()
                 conn.addRequestProperty("User-Agent", "osrs-environment-exporter")
                 BufferedInputStream(conn.getInputStream()).use { inputStream ->
-                    val tarIn = TarArchiveInputStream(
-                        GzipCompressorInputStream(inputStream)
-                    )
-                    var tarEntry: TarArchiveEntry? = tarIn.nextTarEntry
-                    while (tarEntry != null) {
-                        val dest = File(destFolder, tarEntry.name)
-                        if (tarEntry.isDirectory) {
-                            dest.mkdirs()
-                        } else {
-                            Files.copy(tarIn, dest.toPath())
-                        }
-                        tarEntry = tarIn.nextTarEntry
+                    // Delete existing cache folder if it exists to avoid conflicts
+                    val cacheDir = File(destFolder, "cache")
+                    if (cacheDir.exists()) {
+                        cacheDir.deleteRecursively()
                     }
-                    tarIn.close()
+                    
+                    val zipIn = ZipInputStream(inputStream)
+                    var zipEntry: ZipEntry? = zipIn.nextEntry
+                    while (zipEntry != null) {
+                        // OpenRS2 disk.zip format: cache/<filename>.dat2 or cache/<filename>.idx
+                        // Extract directly to destFolder/cache/<filename>
+                        if (!zipEntry.isDirectory) {
+                            val entryName = zipEntry.name
+                            // Remove the leading "cache/" prefix from the path if present
+                            val relativePath = if (entryName.startsWith("cache/")) {
+                                entryName.substring(6) // Remove "cache/" prefix
+                            } else {
+                                entryName
+                            }
+                            val dest = File(destFolder, "cache/$relativePath")
+                            dest.parentFile?.mkdirs()
+                            // Use REPLACE_EXISTING to overwrite files if they exist
+                            Files.copy(zipIn, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                        }
+                        zipIn.closeEntry()
+                        zipEntry = zipIn.nextEntry
+                    }
+                    zipIn.close()
+
+                    // Also download the keys if available
+                    try {
+                        val openRs2Api = OpenRs2Api()
+                        val keys = openRs2Api.getCacheKeysById(cache.scope, cache.id.toString())
+                        if (keys != null && keys.isNotEmpty()) {
+                            val filePath = destFolder.toPath().resolve("xteas.json")
+                            Files.createDirectories(filePath.parent)
+                            Files.newBufferedWriter(
+                                filePath,
+                                StandardOpenOption.CREATE,
+                                StandardOpenOption.TRUNCATE_EXISTING
+                            ).use { writer ->
+                                ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(writer, keys)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        println("Warning: Could not download cache keys: ${e.message}")
+                        // Continue anyway, keys are optional
+                    }
+
+                    // Generate a basic params.txt file with the revision number from build
+                    try {
+                        val revisionNumber = if (cache.builds.isNotEmpty()) {
+                            cache.builds.first().major
+                        } else {
+                            null
+                        }
+                        
+                        if (revisionNumber != null) {
+                            val paramsFile = File(destFolder, "params.txt")
+                            Files.createDirectories(destFolder.toPath())
+                            Files.newBufferedWriter(
+                                paramsFile.toPath(),
+                                StandardOpenOption.CREATE,
+                                StandardOpenOption.TRUNCATE_EXISTING
+                            ).use { writer ->
+                                writer.write("Created at ${java.time.LocalDateTime.now()}\n")
+                                writer.write("\n")
+                                writer.write("codebase=http://oldschool${revisionNumber}.runescape.com/\n")
+                                writer.write("mainclass=client.class\n")
+                                writer.write("\n")
+                                // The revision number is in param=25
+                                writer.write("param=25=$revisionNumber\n")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        println("Warning: Could not create params.txt: ${e.message}")
+                        // Continue anyway, params.txt is optional
+                    }
 
                     SwingUtilities.invokeLater {
                         onComplete(destFolder.absolutePath)
@@ -357,7 +498,7 @@ class CacheChooserController(
         cacheLibrary = try {
             CacheLibrary("${txtCacheLocation.text}/cache")
         } catch (e: Exception) {
-            lblErrorText.text = defaultErrorText(e)
+            setErrorText(lblErrorText, defaultErrorText(e))
             btnLaunch.isEnabled = false
             return
         }
@@ -366,7 +507,7 @@ class CacheChooserController(
             XteaManager(txtCacheLocation.text)
         } catch (e: Exception) {
             if(e is JsonMappingException || e is JsonProcessingException) {
-                lblErrorText.text = "Bad cache: Could not decode xteas file: ${e.message}"
+                setErrorText(lblErrorText, "Bad cache: Could not decode xteas file: ${e.message ?: "Unknown error"}")
                 return
             }
 
@@ -376,13 +517,13 @@ class CacheChooserController(
                     println("cache decryption keys not found as part of installed cache. Searching archive.openrs2.org")
                     val success = tryLocateCacheKeys(txtCacheLocation.text)
                     if(!success) {
-                        defaultErrorText(e)
+                        setErrorText(lblErrorText, defaultErrorText(e))
                     }
                     return
                 }
             }
 
-            defaultErrorText(e)
+            setErrorText(lblErrorText, defaultErrorText(e))
             btnLaunch.isEnabled = false
             return
         }
@@ -390,7 +531,7 @@ class CacheChooserController(
         try {
             paramsManager.loadFromPath(txtCacheLocation.text)
         } catch (e: Exception) {
-            lblErrorText.text = defaultErrorText(e)
+            setErrorText(lblErrorText, defaultErrorText(e))
             btnLaunch.isEnabled = false
             return
         }
@@ -410,16 +551,19 @@ class CacheChooserController(
         println("attempting to locate cache decryption keys for cache: $cacheLocation")
 
         val openRsApi = OpenRs2Api()
-        val caches = openRsApi.getCaches()
+        val allCaches = openRsApi.getCaches()
+        
+        // Filter by oldschool game to narrow down the search
+        val caches = allCaches.filter { it.game == "oldschool" }
 
         for (cache in caches) {
             val instant = cache.timestamp?.let { Instant.parse(it) }
             val localDate = instant?.atZone(ZoneId.of("UTC"))?.toLocalDate()
-            localDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val dateStr = localDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-            if(localDate == date) {
+            if(dateStr == date?.format(DateTimeFormatter.ISO_LOCAL_DATE)) {
                 println("Found openrs2 cache matching date: $date with id: ${cache.id}, fetching keys...")
-                val keys = openRsApi.getCacheKeysById(cache.id.toString())
+                val keys = openRsApi.getCacheKeysById(cache.scope, cache.id.toString())
 
                 val directory = Paths.get(cacheLocation)
                 Files.createDirectories(directory)
@@ -461,16 +605,52 @@ class CacheChooserController(
         }
     }
 
+    private fun formatCacheDisplayString(cache: OpenRs2Cache): String {
+        val dateStr = cache.timestamp?.let {
+            try {
+                val instant = Instant.parse(it)
+                val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
+                localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            } catch (e: Exception) {
+                null
+            }
+        } ?: "Unknown date"
+        
+        val buildStr = if (cache.builds.isNotEmpty()) {
+            val build = cache.builds.first()
+            if (build.minor != null) {
+                "${build.major}.${build.minor}"
+            } else {
+                "${build.major}"
+            }
+        } else {
+            "?"
+        }
+        
+        val envStr = cache.environment.replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it }
+        
+        return "$dateStr - Build $buildStr ($envStr)"
+    }
+
+    private fun setErrorText(lblErrorText: JLabel, message: String) {
+        val escapedMessage = message
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+        // Use a larger width and allow word wrapping
+        lblErrorText.text = "<html><body style='width: 400px; padding: 4px; word-wrap: break-word;'>$escapedMessage</body></html>"
+    }
+
     private fun defaultErrorText(e: Exception) = when (e) {
         is FileNotFoundException -> "Bad cache: Missing required file: ${e.message}"
         else -> {
             e.printStackTrace()
-            e.message
+            e.message ?: "Unknown error occurred"
         }
     }
 
     companion object {
-        private const val RUNESTATS_URL = "https://archive.runestats.com/osrs"
         private const val OPENRS2_URL = "https://archive.openrs2.org"
     }
 }
