@@ -475,8 +475,7 @@ class CacheChooserController(
             }
 
             if (e is FileNotFoundException) {
-                val msg = e.message ?: "Unknown file"
-                if (msg.contains("xteas.json")) {
+                if (e.message?.contains("xteas.json") ?: false) {
                     logger.warn("cache decryption keys not found as part of installed cache. Searching archive.openrs2.org")
                     val success = tryLocateCacheKeys(txtCacheLocation.text)
                     if (!success) {
