@@ -26,17 +26,22 @@
 package cache.loaders
 
 import cache.IndexType
+import cache.ParamType
+import cache.ParamsManager
 import cache.definitions.TextureDefinition
 import cache.utils.readUnsignedByte
 import cache.utils.readUnsignedShort
 import com.displee.cache.CacheLibrary
 import java.nio.ByteBuffer
 
-class TextureLoader(cacheLibrary: CacheLibrary) {
+private const val SINGLE_FILE_TEXTURE_CACHE_REVISION = 234
+
+class TextureLoader(cacheLibrary: CacheLibrary, paramsManager: ParamsManager) {
     private val textureDefinitionCache = HashMap<Int, TextureDefinition>()
+    private val shouldUseSingleFileTextures = (paramsManager.getParam(ParamType.REVISION)?.toInt() ?: 0) >= SINGLE_FILE_TEXTURE_CACHE_REVISION
 
     fun getAll(): Array<TextureDefinition?> {
-        val maxId = textureDefinitionCache.maxBy { it.key }!!.key
+        val maxId = textureDefinitionCache.maxBy { it.key }.key
         // Jagex skipped texture id 54 so now we have to do this?
         val texArray = arrayOfNulls<TextureDefinition>(maxId + 1)
         for (tex in textureDefinitionCache) {
@@ -49,7 +54,7 @@ class TextureLoader(cacheLibrary: CacheLibrary) {
         return textureDefinitionCache[id]
     }
 
-    private fun load(id: Int, b: ByteArray?): TextureDefinition {
+    private fun loadMultiFileTexture(id: Int, b: ByteArray): TextureDefinition {
         val def = TextureDefinition()
         val inputStream = ByteBuffer.wrap(b)
         def.field1777 = inputStream.readUnsignedShort()
@@ -80,6 +85,19 @@ class TextureLoader(cacheLibrary: CacheLibrary) {
         return def
     }
 
+    private fun loadSingleFileTexture(id: Int, b: ByteArray): TextureDefinition {
+        val def = TextureDefinition()
+        val inputStream = ByteBuffer.wrap(b)
+        def.id = id
+        def.fileIds = IntArray(1) { inputStream.readUnsignedShort() }
+        def.field1777 = inputStream.readUnsignedShort()
+        def.field1778 = inputStream.get() != 0.toByte()
+        def.field1786 = IntArray(1) { 0 }
+        def.field1783 = inputStream.readUnsignedByte()
+        def.field1782 = inputStream.readUnsignedByte()
+        return def
+    }
+
     fun getAverageTextureRGB(id: Int): Int {
         val texture = get(id)
         return texture?.field1777 ?: 0
@@ -90,7 +108,8 @@ class TextureLoader(cacheLibrary: CacheLibrary) {
         val archive = index.archive(0)
         for (file in archive!!.fileIds()) {
             val data = cacheLibrary.data(IndexType.TEXTURES.id, 0, file)
-            val def = load(file, data)
+            if (data == null) continue
+            val def = if (shouldUseSingleFileTextures) loadSingleFileTexture(file, data) else loadMultiFileTexture(file, data)
             textureDefinitionCache[def.id] = def
         }
         cacheLibrary.index(IndexType.TEXTURES.id).unCache() // free memory
