@@ -130,7 +130,7 @@ class CacheChooserController(
                         null
                     }
                 } ?: "unknown"
-                
+
                 lblStatusText.text = "Downloading cache ${dateStr}, please wait.."
                 txtCacheLocation.text = ""
 
@@ -314,7 +314,7 @@ class CacheChooserController(
             try {
                 val openRs2Api = OpenRs2Api()
                 val allCaches = openRs2Api.getCaches()
-                
+
                 // Filter by oldschool game and sort by timestamp (newest first)
                 val filteredCaches = allCaches
                     .filter { it.game == "oldschool" }
@@ -327,7 +327,7 @@ class CacheChooserController(
                             }
                         } ?: 0L
                     }
-                
+
                 SwingUtilities.invokeLater {
                     if (filteredCaches.isEmpty()) {
                         listCachesPlaceholder.text = "No Old School RuneScape caches found."
@@ -387,7 +387,7 @@ class CacheChooserController(
                     if (cacheDir.exists()) {
                         cacheDir.deleteRecursively()
                     }
-                    
+
                     val zipIn = ZipInputStream(inputStream)
                     var zipEntry: ZipEntry? = zipIn.nextEntry
                     while (zipEntry != null) {
@@ -489,7 +489,7 @@ class CacheChooserController(
         xteaManager = try {
             XteaManager(txtCacheLocation.text)
         } catch (e: Exception) {
-            if(e is JsonMappingException || e is JsonProcessingException) {
+            if (e is JsonMappingException || e is JsonProcessingException) {
                 setErrorText(lblErrorText, "Bad cache: Could not decode xteas file: ${e.message ?: "Unknown error"}")
                 return
             }
@@ -499,7 +499,7 @@ class CacheChooserController(
                 if (msg.contains("xteas.json")) {
                     logger.warn("cache decryption keys not found as part of installed cache. Searching archive.openrs2.org")
                     val success = tryLocateCacheKeys(txtCacheLocation.text)
-                    if(!success) {
+                    if (!success) {
                         setErrorText(lblErrorText, defaultErrorText(e))
                     }
                     return
@@ -520,14 +520,14 @@ class CacheChooserController(
         }
     }
 
-     /**
-      * Fetches the list of all available caches from OpenRS2 archive and filters for a cache which matches the
-      *  date on the user's selected cache.
-      *
-      * @return A list of OpenRs2Cache objects containing information about available caches
-      * @throws IOException If a network error occurs
-      * @throws HttpException If the server returns a non-2xx status code
-      */
+    /**
+     * Fetches the list of all available caches from OpenRS2 archive and filters for a cache which matches the
+     *  date on the user's selected cache.
+     *
+     * @return A list of OpenRs2Cache objects containing information about available caches
+     * @throws IOException If a network error occurs
+     * @throws HttpException If the server returns a non-2xx status code
+     */
     private fun tryLocateCacheKeys(cacheLocation: String): Boolean {
         val date = parseDateFromCachePath(cacheLocation) ?: return false
 
@@ -535,7 +535,7 @@ class CacheChooserController(
 
         val openRsApi = OpenRs2Api()
         val allCaches = openRsApi.getCaches()
-        
+
         // Filter by oldschool game to narrow down the search
         val caches = allCaches.filter { it.game == "oldschool" }
 
@@ -544,7 +544,7 @@ class CacheChooserController(
             val localDate = instant?.atZone(ZoneId.of("UTC"))?.toLocalDate()
             val dateStr = localDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-            if(dateStr == date?.format(DateTimeFormatter.ISO_LOCAL_DATE)) {
+            if (dateStr == date?.format(DateTimeFormatter.ISO_LOCAL_DATE)) {
                 logger.debug("Found openrs2 cache matching date: {} with id: {}, fetching keys...", date, cache.id)
                 val keys = openRsApi.getCacheKeysById(cache.scope, cache.id.toString())
 
