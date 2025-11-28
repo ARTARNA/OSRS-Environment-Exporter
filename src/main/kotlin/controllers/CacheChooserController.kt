@@ -356,7 +356,7 @@ class CacheChooserController(
         val buildStr = "rev${cache.builds.firstOrNull()?.versionString ?: "unknown"}"
 
         val destFolderName = "$dateStr-$buildStr"
-        val destFolder = File("${AppConstants.CACHES_DIRECTORY}/$destFolderName")
+        val destFolder = File(AppConstants.CACHES_DIRECTORY, destFolderName)
 
         Thread {
             try {
