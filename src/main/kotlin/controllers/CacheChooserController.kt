@@ -12,6 +12,8 @@ import controllers.main.MainController
 import models.StartupOptions
 import models.config.ConfigOptions
 import models.openrs2.OpenRs2Cache
+import models.openrs2.dateString
+import models.openrs2.timestampDateTime
 import models.openrs2.versionString
 import org.slf4j.LoggerFactory
 import ui.FilteredListModel
@@ -30,10 +32,10 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -122,17 +124,7 @@ class CacheChooserController(
         btnDownload.addActionListener {
             btnDownload.isEnabled = false
             listCaches.selectedValue?.let { cache ->
-                val dateStr = cache.timestamp?.let {
-                    try {
-                        val instant = Instant.parse(it)
-                        val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
-                        localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    } catch (e: Exception) {
-                        null
-                    }
-                } ?: "unknown"
-
-                lblStatusText.text = "Downloading cache ${dateStr}, please wait.."
+                lblStatusText.text = "Downloading cache ${cache.dateString ?: "unknown"}, please wait.."
                 txtCacheLocation.text = ""
 
                 downloadCache(cache, { path ->
@@ -322,11 +314,11 @@ class CacheChooserController(
                     .sortedByDescending { cache ->
                         cache.timestamp?.let {
                             try {
-                                Instant.parse(it).toEpochMilli()
-                            } catch (e: Exception) {
-                                0L
+                                it.let(Instant::parse)
+                            } catch (_: DateTimeException) {
+                                null
                             }
-                        } ?: 0L
+                        }
                     }
 
                 SwingUtilities.invokeLater {
@@ -360,16 +352,7 @@ class CacheChooserController(
         onFailure: (IOException) -> Unit,
     ) {
         // Generate a folder name based on date and build
-        val dateStr = cache.timestamp?.let {
-            try {
-                val instant = Instant.parse(it)
-                val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
-                localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            } catch (e: Exception) {
-                null
-            }
-        } ?: "unknown"
-
+        val dateStr = cache.dateString ?: "unknown"
         val buildStr = "rev${cache.builds.firstOrNull()?.versionString ?: "unknown"}"
 
         val destFolderName = "$dateStr-$buildStr"
@@ -531,17 +514,12 @@ class CacheChooserController(
         logger.debug("attempting to locate cache decryption keys for cache: {}", cacheLocation)
 
         val openRsApi = OpenRs2Api()
-        val allCaches = openRsApi.getCaches()
-
-        // Filter by oldschool game to narrow down the search
-        val caches = allCaches.filter { it.game == "oldschool" }
+        val caches = openRsApi.getCaches().filter { it.game == "oldschool" }
 
         for (cache in caches) {
-            val instant = cache.timestamp?.let { Instant.parse(it) }
-            val localDate = instant?.atZone(ZoneId.of("UTC"))?.toLocalDate()
-            val dateStr = localDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val localDate = cache.timestampDateTime?.toLocalDate()
 
-            if (dateStr == date?.format(DateTimeFormatter.ISO_LOCAL_DATE)) {
+            if (localDate == date) {
                 logger.debug("Found openrs2 cache matching date: {} with id: {}, fetching keys...", date, cache.id)
                 val keys = openRsApi.getCacheKeysById(cache.scope, cache.id.toString())
 
@@ -586,18 +564,8 @@ class CacheChooserController(
     }
 
     private fun formatCacheDisplayString(cache: OpenRs2Cache): String {
-        val dateStr = cache.timestamp?.let {
-            try {
-                val instant = Instant.parse(it)
-                val localDate = instant.atZone(ZoneId.of("UTC")).toLocalDate()
-                localDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            } catch (e: Exception) {
-                null
-            }
-        } ?: "Unknown date"
-
+        val dateStr = cache.dateString ?: "Unknown date"
         val buildStr = cache.builds.firstOrNull()?.versionString ?: "?"
-
         val envStr = cache.environment.replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it }
 
         return "$dateStr - Build $buildStr ($envStr)"
