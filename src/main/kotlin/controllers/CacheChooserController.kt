@@ -1,6 +1,7 @@
 package controllers
 
 import AppConstants
+import cache.ParamType
 import cache.ParamsManager
 import cache.XteaManager
 import com.displee.cache.CacheLibrary
@@ -439,13 +440,9 @@ class CacheChooserController(
                                 StandardOpenOption.CREATE,
                                 StandardOpenOption.TRUNCATE_EXISTING
                             ).use { writer ->
-                                writer.write("Created at ${java.time.LocalDateTime.now()}\n")
-                                writer.write("\n")
-                                writer.write("codebase=http://oldschool${revisionNumber}.runescape.com/\n")
-                                writer.write("mainclass=client.class\n")
-                                writer.write("\n")
-                                // The revision number is in param=25
-                                writer.write("param=25=$revisionNumber\n")
+                                writer.write("Created at ${LocalDateTime.now()}\n")
+                                writer.write("Synthetic params.txt, not derived from launcher\n")
+                                writer.write("param=${ParamType.REVISION.id}=$revisionNumber\n")
                             }
                         }
                     } catch (e: Exception) {
