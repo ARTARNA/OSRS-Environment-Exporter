@@ -11,6 +11,7 @@ import controllers.main.MainController
 import models.StartupOptions
 import models.config.ConfigOptions
 import models.openrs2.OpenRs2Cache
+import models.openrs2.versionString
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
@@ -368,18 +369,9 @@ class CacheChooserController(
                 null
             }
         } ?: "unknown"
-        
-        val buildStr = if (cache.builds.isNotEmpty()) {
-            val build = cache.builds.first()
-            if (build.minor != null) {
-                "rev${build.major}.${build.minor}"
-            } else {
-                "rev${build.major}"
-            }
-        } else {
-            "revunknown"
-        }
-        
+
+        val buildStr = "rev${cache.builds.firstOrNull()?.versionString ?: "unknown"}"
+
         val destFolderName = "$dateStr-$buildStr"
         val destFolder = File("${AppConstants.CACHES_DIRECTORY}/$destFolderName")
 
@@ -405,11 +397,7 @@ class CacheChooserController(
                         if (!zipEntry.isDirectory) {
                             val entryName = zipEntry.name
                             // Remove the leading "cache/" prefix from the path if present
-                            val relativePath = if (entryName.startsWith("cache/")) {
-                                entryName.substring(6) // Remove "cache/" prefix
-                            } else {
-                                entryName
-                            }
+                            val relativePath = entryName.removePrefix("cache/")
                             val dest = File(destFolder, "cache/$relativePath")
                             dest.parentFile?.mkdirs()
                             // Use REPLACE_EXISTING to overwrite files if they exist
@@ -442,12 +430,8 @@ class CacheChooserController(
 
                     // Generate a basic params.txt file with the revision number from build
                     try {
-                        val revisionNumber = if (cache.builds.isNotEmpty()) {
-                            cache.builds.first().major
-                        } else {
-                            null
-                        }
-                        
+                        val revisionNumber = cache.builds.firstOrNull()?.major
+
                         if (revisionNumber != null) {
                             val paramsFile = File(destFolder, "params.txt")
                             Files.createDirectories(destFolder.toPath())
@@ -615,20 +599,11 @@ class CacheChooserController(
                 null
             }
         } ?: "Unknown date"
-        
-        val buildStr = if (cache.builds.isNotEmpty()) {
-            val build = cache.builds.first()
-            if (build.minor != null) {
-                "${build.major}.${build.minor}"
-            } else {
-                "${build.major}"
-            }
-        } else {
-            "?"
-        }
-        
+
+        val buildStr = cache.builds.firstOrNull()?.versionString ?: "?"
+
         val envStr = cache.environment.replaceFirstChar { if (it.isLowerCase()) it.uppercaseChar() else it }
-        
+
         return "$dateStr - Build $buildStr ($envStr)"
     }
 

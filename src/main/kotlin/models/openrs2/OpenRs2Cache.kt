@@ -48,3 +48,5 @@ data class Build @JsonCreator constructor(
     @JsonProperty("minor")
     val minor: Int? = null
 )
+
+val Build.versionString: String get() = if (minor == null) major.toString() else "$major.$minor"
