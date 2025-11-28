@@ -12,11 +12,7 @@ import models.StartupOptions
 import models.config.ConfigOptions
 import models.openrs2.OpenRs2Cache
 import models.openrs2.versionString
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipEntry
+import org.slf4j.LoggerFactory
 import ui.FilteredListModel
 import ui.listener.DocumentTextListener
 import ui.listener.FilterTextListener
@@ -38,6 +34,8 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 import javax.net.ssl.SSLHandshakeException
 import javax.swing.GroupLayout
 import javax.swing.GroupLayout.Alignment
@@ -63,6 +61,7 @@ class CacheChooserController(
     var cacheLibrary: CacheLibrary? = null
     var xteaManager: XteaManager? = null
     private val paramsManager: ParamsManager = ParamsManager()
+    private val logger = LoggerFactory.getLogger(CacheChooserController::class.java)
 
     init {
         defaultCloseOperation = DISPOSE_ON_CLOSE
@@ -424,7 +423,7 @@ class CacheChooserController(
                             }
                         }
                     } catch (e: Exception) {
-                        println("Warning: Could not download cache keys: ${e.message}")
+                        logger.warn("Warning: Could not download cache keys", e)
                         // Continue anyway, keys are optional
                     }
 
@@ -450,7 +449,7 @@ class CacheChooserController(
                             }
                         }
                     } catch (e: Exception) {
-                        println("Warning: Could not create params.txt: ${e.message}")
+                        logger.warn("Warning: Could not create params.txt", e)
                         // Continue anyway, params.txt is optional
                     }
 
@@ -498,7 +497,7 @@ class CacheChooserController(
             if (e is FileNotFoundException) {
                 val msg = e.message ?: "Unknown file"
                 if (msg.contains("xteas.json")) {
-                    println("cache decryption keys not found as part of installed cache. Searching archive.openrs2.org")
+                    logger.warn("cache decryption keys not found as part of installed cache. Searching archive.openrs2.org")
                     val success = tryLocateCacheKeys(txtCacheLocation.text)
                     if(!success) {
                         setErrorText(lblErrorText, defaultErrorText(e))
@@ -532,7 +531,7 @@ class CacheChooserController(
     private fun tryLocateCacheKeys(cacheLocation: String): Boolean {
         val date = parseDateFromCachePath(cacheLocation) ?: return false
 
-        println("attempting to locate cache decryption keys for cache: $cacheLocation")
+        logger.debug("attempting to locate cache decryption keys for cache: {}", cacheLocation)
 
         val openRsApi = OpenRs2Api()
         val allCaches = openRsApi.getCaches()
@@ -546,7 +545,7 @@ class CacheChooserController(
             val dateStr = localDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
             if(dateStr == date?.format(DateTimeFormatter.ISO_LOCAL_DATE)) {
-                println("Found openrs2 cache matching date: $date with id: ${cache.id}, fetching keys...")
+                logger.debug("Found openrs2 cache matching date: {} with id: {}, fetching keys...", date, cache.id)
                 val keys = openRsApi.getCacheKeysById(cache.scope, cache.id.toString())
 
                 val directory = Paths.get(cacheLocation)
@@ -584,7 +583,7 @@ class CacheChooserController(
             val dateStr = matchResult?.groupValues?.get(1) ?: return null
             return LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
         } catch (e: Exception) {
-            println("failed to parse date from cache: ${e.message}")
+            logger.error("failed to parse date from cache", e)
             return null
         }
     }
