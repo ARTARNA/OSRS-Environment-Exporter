@@ -246,6 +246,9 @@ class ObjectLoader(private val cacheLibrary: CacheLibrary) : ThreadsafeLazyLoade
             }
             transforms[length + 1] = transform
             def.transforms = transforms
+        } else if (opcode == 95) {
+            logger.debug("Processed ignored opcode 95 for $def")
+            inputStream.readUnsignedByte()
         } else if (opcode == 249) {
             val length: Int = inputStream.readUnsignedByte()
             val params: MutableMap<Int, Any> = java.util.HashMap(length)
