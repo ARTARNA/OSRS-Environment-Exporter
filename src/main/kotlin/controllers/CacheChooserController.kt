@@ -27,7 +27,6 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.net.URL
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -306,10 +305,9 @@ class CacheChooserController(
         Thread {
             try {
                 val openRs2Api = OpenRs2Api()
-                val allCaches = openRs2Api.getCaches()
 
                 // Filter by oldschool game and sort by timestamp (newest first)
-                val filteredCaches = allCaches
+                val filteredCaches = openRs2Api.fetchCaches()
                     .filter { it.game == "oldschool" }
                     .sortedByDescending { cache ->
                         cache.timestamp?.let {
@@ -360,82 +358,78 @@ class CacheChooserController(
 
         Thread {
             try {
-                // Check if disk.zip is available (disk_store_valid should be true for new engine caches)
-                // Download from OpenRS2 disk.zip endpoint which provides .dat2/.idx files directly
-                val url = "$OPENRS2_URL/caches/${cache.scope}/${cache.id}/disk.zip"
-                val conn = URL(url).openConnection()
-                conn.addRequestProperty("User-Agent", "osrs-environment-exporter")
-                BufferedInputStream(conn.getInputStream()).use { inputStream ->
-                    // Delete existing cache folder if it exists to avoid conflicts
-                    val cacheDir = File(destFolder, "cache")
-                    if (cacheDir.exists()) {
+                val openRs2Api = OpenRs2Api()
+
+                // Download and extract cache from OpenRS2
+                BufferedInputStream(openRs2Api.fetchCacheZipById(cache.scope, cache.id.toString())).use { inputStream ->
+
+                    ZipInputStream(inputStream).use { zipIn ->
+                        // Delete existing cache folder if it exists to avoid conflicts
+                        val cacheDir = File(destFolder, "cache")
                         cacheDir.deleteRecursively()
-                    }
 
-                    val zipIn = ZipInputStream(inputStream)
-                    var zipEntry: ZipEntry? = zipIn.nextEntry
-                    while (zipEntry != null) {
-                        // OpenRS2 disk.zip format: cache/<filename>.dat2 or cache/<filename>.idx
-                        // Extract directly to destFolder/cache/<filename>
-                        if (!zipEntry.isDirectory) {
-                            val entryName = zipEntry.name
-                            // Remove the leading "cache/" prefix from the path if present
-                            val relativePath = entryName.removePrefix("cache/")
-                            val dest = File(destFolder, "cache/$relativePath")
-                            dest.parentFile?.mkdirs()
-                            // Use REPLACE_EXISTING to overwrite files if they exist
-                            Files.copy(zipIn, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                        }
-                        zipIn.closeEntry()
-                        zipEntry = zipIn.nextEntry
-                    }
-                    zipIn.close()
-
-                    // Also download the keys if available
-                    try {
-                        val openRs2Api = OpenRs2Api()
-                        val keys = openRs2Api.getCacheKeysById(cache.scope, cache.id.toString())
-                        if (keys != null && keys.isNotEmpty()) {
-                            val filePath = destFolder.toPath().resolve("xteas.json")
-                            Files.createDirectories(filePath.parent)
-                            Files.newBufferedWriter(
-                                filePath,
-                                StandardOpenOption.CREATE,
-                                StandardOpenOption.TRUNCATE_EXISTING
-                            ).use { writer ->
-                                ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(writer, keys)
+                        var zipEntry: ZipEntry? = zipIn.nextEntry
+                        while (zipEntry != null) {
+                            // OpenRS2 disk.zip format: cache/<filename>.dat2 or cache/<filename>.idx
+                            // Extract directly to destFolder/cache/<filename>
+                            if (!zipEntry.isDirectory) {
+                                val entryName = zipEntry.name
+                                // Remove the leading "cache/" prefix from the path if present
+                                val relativePath = entryName.removePrefix("cache/")
+                                val dest = File(destFolder, "cache/$relativePath")
+                                dest.parentFile?.mkdirs()
+                                // Use REPLACE_EXISTING to overwrite files if they exist
+                                Files.copy(zipIn, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
                             }
+                            zipIn.closeEntry()
+                            zipEntry = zipIn.nextEntry
                         }
-                    } catch (e: Exception) {
-                        logger.warn("Warning: Could not download cache keys", e)
-                        // Continue anyway, keys are optional
                     }
+                }
 
-                    // Generate a basic params.txt file with the revision number from build
-                    try {
-                        val revisionNumber = cache.builds.firstOrNull()?.major
-
-                        if (revisionNumber != null) {
-                            val paramsFile = File(destFolder, "params.txt")
-                            Files.createDirectories(destFolder.toPath())
-                            Files.newBufferedWriter(
-                                paramsFile.toPath(),
-                                StandardOpenOption.CREATE,
-                                StandardOpenOption.TRUNCATE_EXISTING
-                            ).use { writer ->
-                                writer.write("Created at ${LocalDateTime.now()}\n")
-                                writer.write("Synthetic params.txt, not derived from launcher\n")
-                                writer.write("param=${ParamType.REVISION.id}=$revisionNumber\n")
-                            }
+                // Also download the keys if available
+                try {
+                    val keys = openRs2Api.fetchCacheKeysById(cache.scope, cache.id.toString())
+                    if (keys.isNotEmpty()) {
+                        val filePath = destFolder.toPath().resolve("xteas.json")
+                        Files.createDirectories(filePath.parent)
+                        Files.newBufferedWriter(
+                            filePath,
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING
+                        ).use { writer ->
+                            ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(writer, keys)
                         }
-                    } catch (e: Exception) {
-                        logger.warn("Warning: Could not create params.txt", e)
-                        // Continue anyway, params.txt is optional
                     }
+                } catch (e: Exception) {
+                    logger.warn("Warning: Could not download cache keys", e)
+                    // Continue anyway, keys are optional
+                }
 
-                    SwingUtilities.invokeLater {
-                        onComplete(destFolder.absolutePath)
+                // Generate a basic params.txt file with the revision number from build
+                try {
+                    val revisionNumber = cache.builds.firstOrNull()?.major
+
+                    if (revisionNumber != null) {
+                        val paramsFile = File(destFolder, "params.txt")
+                        Files.createDirectories(destFolder.toPath())
+                        Files.newBufferedWriter(
+                            paramsFile.toPath(),
+                            StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING
+                        ).use { writer ->
+                            writer.write("Created at ${LocalDateTime.now()}\n")
+                            writer.write("Synthetic params.txt, not derived from launcher\n")
+                            writer.write("param=${ParamType.REVISION.id}=$revisionNumber\n")
+                        }
                     }
+                } catch (e: Exception) {
+                    logger.warn("Warning: Could not create params.txt", e)
+                    // Continue anyway, params.txt is optional
+                }
+
+                SwingUtilities.invokeLater {
+                    onComplete(destFolder.absolutePath)
                 }
             } catch (e: IOException) {
                 e.printStackTrace()
@@ -513,14 +507,14 @@ class CacheChooserController(
         logger.debug("attempting to locate cache decryption keys for cache: {}", cacheLocation)
 
         val openRsApi = OpenRs2Api()
-        val caches = openRsApi.getCaches().filter { it.game == "oldschool" }
+        val caches = openRsApi.fetchCaches().filter { it.game == "oldschool" }
 
         for (cache in caches) {
             val localDate = cache.timestampDateTime?.toLocalDate()
 
             if (localDate == date) {
                 logger.debug("Found openrs2 cache matching date: {} with id: {}, fetching keys...", date, cache.id)
-                val keys = openRsApi.getCacheKeysById(cache.scope, cache.id.toString())
+                val keys = openRsApi.fetchCacheKeysById(cache.scope, cache.id.toString())
 
                 val directory = Paths.get(cacheLocation)
                 Files.createDirectories(directory)
@@ -586,9 +580,5 @@ class CacheChooserController(
             e.printStackTrace()
             e.message ?: "Unknown error occurred"
         }
-    }
-
-    companion object {
-        private const val OPENRS2_URL = "https://archive.openrs2.org"
     }
 }
