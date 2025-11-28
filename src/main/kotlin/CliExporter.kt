@@ -31,7 +31,7 @@ class CliExporter(startupOptions: StartupOptions) {
         paramsManager.loadFromPath(startupOptions.cacheDir)
 
         val spriteLoader = SpriteLoader(cacheLibrary)
-        val textureLoader = TextureLoader(cacheLibrary)
+        val textureLoader = TextureLoader(cacheLibrary, paramsManager)
         val regionLoader = RegionLoader(cacheLibrary, paramsManager)
         val locationsLoader = LocationsLoader(cacheLibrary, xteaManager)
         val objectLoader = ObjectLoader(cacheLibrary)
@@ -44,7 +44,8 @@ class CliExporter(startupOptions: StartupOptions) {
 
         val textureManager = TextureManager(spriteLoader, textureLoader)
         val objectToModelConverter = ObjectToModelConverter(modelLoader, debugOptionsModel)
-        val sceneRegionBuilder = SceneRegionBuilder(regionLoader, locationsLoader, objectLoader, underlayLoader, overlayLoader, objectToModelConverter)
+        val sceneRegionBuilder =
+            SceneRegionBuilder(regionLoader, locationsLoader, objectLoader, underlayLoader, overlayLoader, objectToModelConverter)
 
         scene = Scene(sceneRegionBuilder, debugOptionsModel)
         exporter = SceneExporter(textureManager, debugOptionsModel)

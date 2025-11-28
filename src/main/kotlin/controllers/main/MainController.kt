@@ -92,7 +92,7 @@ class MainController constructor(
             ObjectToModelConverter(ModelLoader(cacheLibrary), debugOptions)
         val overlayLoader = OverlayLoader(cacheLibrary)
         val regionLoader = RegionLoader(cacheLibrary, paramsManager)
-        val textureLoader = TextureLoader(cacheLibrary)
+        val textureLoader = TextureLoader(cacheLibrary, paramsManager)
         val underlayLoader = UnderlayLoader(cacheLibrary)
 
         scene = Scene(
